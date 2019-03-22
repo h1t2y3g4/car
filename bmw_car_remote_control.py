@@ -14,23 +14,29 @@ def main():
     GPIO_init()
     d1 = GPIO.PWM(setting.d_1, 10000)
     d2 = GPIO.PWM(setting.d_2, 10000)
+    f1 = GPIO.PWM(setting.f_1, 10000)
+    f2 = GPIO.PWM(setting.f_2, 10000)
+    f1.start(0)
+    f2.start(0)
     d1.start(0)
     d2.start(0)
     while True:
         check_event(status)
-        response_event(setting, status, d1, d2)
+        response_event(setting, status, d1, d2, f1, f2)
 
 
 class Settings:
 
     def __init__(self):
-        self.f_1 = 19
-        self.f_2 = 26
-        self.d_1 = 6
-        self.d_2 = 13
+        self.f_1 = 6
+        self.f_2 = 13
+        self.d_1 = 19
+        self.d_2 = 26
 
         self.sleep_time = 0.3
-        self.duty_cycle = 90
+        self.der_sleep_time = 0.02
+        self.d_duty_cycle = 100
+        self.f_duty_cycle = 80
 
 
 class Status:
@@ -94,55 +100,100 @@ def check_event(status):
                 pass
 
 
-def response_event(setting, status, d1, d2):
+def slow_speed_up(setting, status, speed_io, zero_io, turn_flag=False):
+    """
+    匀加速，以免过载
+    :param turn_flag:
+    :param setting:
+    :param status:
+    :param speed_io:
+    :param zero_io:
+    :return:
+    """
+    i = 0
+    while status.down_time1 - status.up_time2 <= setting.sleep_time:
+        i += int(setting.f_duty_cycle / (setting.sleep_time / setting.der_sleep_time))
+        if turn_flag:
+            if i > int(setting.f_duty_cycle/2):
+                break
+        else:
+            if i > setting.f_duty_cycle:
+                break
+        speed_io.ChangeDutyCycle(i)
+        zero_io.ChangeDutyCycle(0)
+        time.sleep(setting.der_sleep_time)
+
+
+def response_event(setting, status, d1, d2, f1, f2):
     if status.forward_flag:
-        GPIO.output(setting.f_1, GPIO.HIGH)
-        GPIO.output(setting.f_2, GPIO.LOW)
         if status.back_off_flag:
-            GPIO.output(setting.f_1, GPIO.LOW)
-            GPIO.output(setting.f_2, GPIO.LOW)
+            f1.ChangeDutyCycle(0)
+            f2.ChangeDutyCycle(0)
         else:
             if status.left_turn_flag and status.right_turn_flag:
+                slow_speed_up(setting, status, f1, f2)
+                f1.ChangeDutyCycle(setting.f_duty_cycle)
+                f2.ChangeDutyCycle(0)
                 d1.ChangeDutyCycle(0)
                 d2.ChangeDutyCycle(0)
             else:
                 if status.left_turn_flag:
-                    d1.ChangeDutyCycle(setting.duty_cycle)
+                    slow_speed_up(setting, status, f1, f2, True)
+                    f1.ChangeDutyCycle(int(setting.f_duty_cycle/2))
+                    f2.ChangeDutyCycle(0)
+                    d1.ChangeDutyCycle(setting.d_duty_cycle)
                     d2.ChangeDutyCycle(0)
                 elif status.right_turn_flag:
+                    slow_speed_up(setting, status, f1, f2, True)
+                    f1.ChangeDutyCycle(int(setting.f_duty_cycle/2))
+                    f2.ChangeDutyCycle(0)
                     d1.ChangeDutyCycle(0)
-                    d2.ChangeDutyCycle(setting.duty_cycle)
+                    d2.ChangeDutyCycle(setting.d_duty_cycle)
                 else:
                     if status.down_time1 - status.up_time2 <= setting.sleep_time:
                         time.sleep(setting.sleep_time - (status.down_time1 - status.up_time2))
+                    slow_speed_up(setting, status, f1, f2)
+                    f1.ChangeDutyCycle(setting.f_duty_cycle)
+                    f2.ChangeDutyCycle(0)
                     d1.ChangeDutyCycle(0)
                     d2.ChangeDutyCycle(0)
     else:
-        GPIO.output(setting.f_1, GPIO.LOW)
-        GPIO.output(setting.f_2, GPIO.LOW)
+        f1.ChangeDutyCycle(0)
+        f2.ChangeDutyCycle(0)
         if status.back_off_flag:
-            GPIO.output(setting.f_1, GPIO.LOW)
-            GPIO.output(setting.f_2, GPIO.HIGH)
             if status.left_turn_flag and status.right_turn_flag:
+                slow_speed_up(setting, status, f2, f1)
+                f1.ChangeDutyCycle(0)
+                f2.ChangeDutyCycle(setting.f_duty_cycle)
                 d1.ChangeDutyCycle(0)
                 d2.ChangeDutyCycle(0)
             else:
                 if status.left_turn_flag:
-                    d1.ChangeDutyCycle(setting.duty_cycle)
+                    slow_speed_up(setting, status, f2, f1, True)
+                    f1.ChangeDutyCycle(0)
+                    f2.ChangeDutyCycle(int(setting.f_duty_cycle/2))
+                    d1.ChangeDutyCycle(setting.d_duty_cycle)
                     d2.ChangeDutyCycle(0)
                 elif status.right_turn_flag:
+                    slow_speed_up(setting, status, f2, f1, True)
+                    f1.ChangeDutyCycle(0)
+                    f2.ChangeDutyCycle(int(setting.f_duty_cycle / 2))
                     d1.ChangeDutyCycle(0)
-                    d2.ChangeDutyCycle(setting.duty_cycle)
+                    d2.ChangeDutyCycle(setting.d_duty_cycle)
                 else:
                     if status.down_time2 - status.up_time1 <= setting.sleep_time:
                         time.sleep(setting.sleep_time - (status.down_time2 - status.up_time1))
+                    slow_speed_up(setting, status, f2, f1)
+                    f1.ChangeDutyCycle(0)
+                    f2.ChangeDutyCycle(setting.f_duty_cycle)
                     d1.ChangeDutyCycle(0)
                     d2.ChangeDutyCycle(0)
+
         else:
             d1.ChangeDutyCycle(0)
             d2.ChangeDutyCycle(0)
-            GPIO.output(setting.f_1, GPIO.LOW)
-            GPIO.output(setting.f_2, GPIO.LOW)
+            f1.ChangeDutyCycle(0)
+            f2.ChangeDutyCycle(0)
 
 
 if __name__ == '__main__':
